@@ -1,0 +1,80 @@
+name: edgeguard
+
+x-app-env: &app-env
+  MQTT_HOST: broker
+  MQTT_PORT: "1883"
+  MQTT_GATEWAY_USER: gateway
+  MQTT_GATEWAY_PASSWORD: ${MQTT_GATEWAY_PASSWORD:-edgeguard-demo-gateway}
+  MQTT_SENSOR_PASSWORD: ${MQTT_SENSOR_PASSWORD:-edgeguard-demo-sensors}
+  EDGEGUARD_MASTER_KEY: ${EDGEGUARD_MASTER_KEY:-edgeguard-DEMO-master-key-change-before-deploying-2026}
+  DASHBOARD_API_TOKEN: ${DASHBOARD_API_TOKEN:-demo-token-change-me}
+  NODE_COUNT: ${NODE_COUNT:-6}
+  SENSOR_INTERVAL: ${SENSOR_INTERVAL:-2.0}
+  PACKET_LOSS_RATE: ${PACKET_LOSS_RATE:-0.12}
+  ACK_DROP_RATE: ${ACK_DROP_RATE:-0.16}
+  RETRY_TIMEOUT: ${RETRY_TIMEOUT:-1.5}
+  MAX_RETRIES: ${MAX_RETRIES:-3}
+  STALE_SECONDS: ${STALE_SECONDS:-20}
+  ALERT_COOLDOWN_SECONDS: ${ALERT_COOLDOWN_SECONDS:-30}
+
+services:
+  broker-init:
+    image: eclipse-mosquitto:2.0
+    entrypoint: ["/bin/sh", "-ec"]
+    environment:
+      MQTT_GATEWAY_PASSWORD: ${MQTT_GATEWAY_PASSWORD:-edgeguard-demo-gateway}
+      MQTT_SENSOR_PASSWORD: ${MQTT_SENSOR_PASSWORD:-edgeguard-demo-sensors}
+      NODE_COUNT: ${NODE_COUNT:-6}
+    command: |
+      mosquitto_passwd -c -b /mosquitto/auth/passwords gateway "$$MQTT_GATEWAY_PASSWORD"
+      n=1
+      while [ "$$n" -le "$$NODE_COUNT" ]; do
+        id=$$(printf 'sensor-%02d' "$$n")
+        mosquitto_passwd -b /mosquitto/auth/passwords "$$id" "$$MQTT_SENSOR_PASSWORD"
+        n=$$((n + 1))
+      done
+      chmod 644 /mosquitto/auth/passwords
+    volumes:
+      - broker_auth:/mosquitto/auth
+    restart: "no"
+
+  broker:
+    image: eclipse-mosquitto:2.0
+    depends_on:
+      broker-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/acl:/mosquitto/config/acl:ro
+      - broker_auth:/mosquitto/auth:ro
+      - broker_data:/mosquitto/data
+    restart: unless-stopped
+
+  gateway:
+    build: .
+    environment:
+      <<: *app-env
+      DATABASE_PATH: /app/data/edgeguard.db
+    depends_on:
+      - broker
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - edgeguard_data:/app/data
+    restart: unless-stopped
+
+  simulator:
+    build: .
+    command: ["python", "-m", "edgeguard", "simulate"]
+    environment: *app-env
+    depends_on:
+      - broker
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  broker_auth:
+  broker_data:
+  edgeguard_data:

@@ -1,0 +1,10 @@
+# Gateway can inspect measurements and send per-node ACKs.
+user gateway
+topic read edgeguard/telemetry/+
+topic read edgeguard/health/+
+topic write edgeguard/acks/+
+
+# Sensor accounts may only use their own measurement/health and ACK topics.
+pattern write edgeguard/telemetry/%u
+pattern write edgeguard/health/%u
+pattern read edgeguard/acks/%u
